@@ -75,6 +75,31 @@ module ActiveJob
         end
       end
 
+      def assert_enqueued(job_or_class, queue: nil)
+        case job_or_class
+        when ActiveJob::Base
+          assert_enqueued_job(job_or_class, queue)
+        when Class
+          assert_enqueued_job_class(job_or_class, queue)
+        when String
+          assert_enqueued_job_class(job_or_class.constantize, queue)
+        else
+          raise "#{job_or_class} must be a descendant of ActiveJob::Base or an instance of one."
+        end
+      end
+
+      def assert_enqueued_job(job, queue: nil)
+        assert_includes @adapter.enqueued(queue), job.serialize
+      end
+
+      def assert_enqueued_job_class(job_class, queue: nil)
+        has_enqueued_class = @adapter.enqueued(queue).any? do |serialized_job| 
+          serialized_job['job_class'] == job_class.name
+        end
+
+        assert has_enqueued_class, "#{job_class.name} was not found in #{queue ? queue.to_s : 'any queue'}."
+      end
+
       # Asserts that no jobs have been enqueued.
       #
       #   def test_jobs
