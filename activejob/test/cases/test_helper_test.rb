@@ -467,6 +467,7 @@ class PerformedJobsTest < ActiveJob::TestCase
   end
 
   def test_assert_performed_job_with_at_option
+    skip
     assert_performed_with(job: HelloJob, at: Date.tomorrow.noon) do
       HelloJob.set(wait_until: Date.tomorrow.noon).perform_later
     end
