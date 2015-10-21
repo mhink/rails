@@ -5,6 +5,43 @@ module ActiveJob
   module TestHelper
     extend ActiveSupport::Concern
 
+    included do
+      include Compatibility
+
+      def before_setup # :nodoc:
+        test_adapter = ActiveJob::QueueAdapters::TestAdapter.new
+
+        @old_queue_adapters = (ActiveJob::Base.subclasses << ActiveJob::Base).select do |klass|
+          klass.singleton_class.public_instance_methods(false).include?(:_queue_adapter)
+        end.map do |klass|
+          [klass, klass.queue_adapter].tap do
+            klass.queue_adapter = test_adapter
+          end
+        end
+
+        super
+      end
+
+      def after_teardown # :nodoc:
+        super
+        @old_queue_adapters.each do |(klass, adapter)|
+          klass.queue_adapter = adapter
+        end
+      end
+
+      def perform_jobs!(n = nil)
+        queue_adapter.perform(n)
+      end
+
+      def queue_adapter
+        ActiveJob::Base.queue_adapter
+      end
+
+      delegate :enqueued_jobs, :enqueued_jobs=,
+               :performed_jobs, :performed_jobs=,
+               to: :queue_adapter
+    end
+
     module Compatibility
       def perform_enqueued_jobs(only: nil)
         queue_adapter.perform_immediately_within(only: only) do 
@@ -114,51 +151,6 @@ module ActiveJob
         assert matching_job, "No performed job found with #{args}"
         matching_job
       end
-
-
-      def serialize_args_for_assertion(args) # :nodoc:
-        args.dup.tap do |serialized_args|
-          serialized_args[:args] = ActiveJob::Arguments.serialize(serialized_args[:args]) if serialized_args[:args]
-          serialized_args[:at]   = serialized_args[:at].to_f if serialized_args[:at]
-        end
-      end
-    end
-
-    included do
-      include Compatibility
-
-      def before_setup # :nodoc:
-        test_adapter = ActiveJob::QueueAdapters::TestAdapter.new
-
-        @old_queue_adapters = (ActiveJob::Base.subclasses << ActiveJob::Base).select do |klass|
-          klass.singleton_class.public_instance_methods(false).include?(:_queue_adapter)
-        end.map do |klass|
-          [klass, klass.queue_adapter].tap do
-            klass.queue_adapter = test_adapter
-          end
-        end
-
-        super
-      end
-
-      def after_teardown # :nodoc:
-        super
-        @old_queue_adapters.each do |(klass, adapter)|
-          klass.queue_adapter = adapter
-        end
-      end
-
-      def perform_jobs!(n = nil)
-        queue_adapter.perform(n)
-      end
-
-      def queue_adapter
-        ActiveJob::Base.queue_adapter
-      end
-
-      delegate :enqueued_jobs, :enqueued_jobs=,
-               :performed_jobs, :performed_jobs=,
-               to: :queue_adapter
     end
   end
 end
