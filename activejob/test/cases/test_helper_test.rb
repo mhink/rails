@@ -255,11 +255,11 @@ end
 
 class PerformedJobsTest < ActiveJob::TestCase
   def test_performed_enqueue_jobs_with_only_option_doesnt_leak_outside_the_block
-    assert_equal nil, queue_adapter.filter
+    filter_before = queue_adapter.filter
     perform_enqueued_jobs only: HelloJob do
       assert_equal HelloJob, queue_adapter.filter
     end
-    assert_equal nil, queue_adapter.filter
+    assert_equal filter_before, queue_adapter.filter
   end
 
   def test_assert_performed_jobs
@@ -292,6 +292,18 @@ class PerformedJobsTest < ActiveJob::TestCase
         HelloJob.perform_later('sean')
       end
     end
+    assert_match "Expected: 2", e.message
+    assert_match "Actual: 1", e.message
+  end
+
+  def test_assert_performed_jobs_with_no_block_message
+    e = assert_raises Minitest::Assertion do
+      perform_enqueued_jobs do
+        HelloJob.perform_later('rafael')
+      end
+      assert_performed_jobs 2
+    end
+
     assert_match "Expected: 2", e.message
     assert_match "Actual: 1", e.message
   end

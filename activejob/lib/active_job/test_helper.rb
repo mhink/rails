@@ -26,7 +26,8 @@ module ActiveJob
 
           assert_equal number, performed_jobs.length, "#{number} jobs expected, but #{performed_jobs.length} were performed" 
         else
-          # TODO: Write tests for this failure case! Jesus.
+          actual_count = performed_jobs_size(only: only)
+          assert_equal number, actual_count, "#{number} jobs expected, but #{actual_count} were performed"
         end
       end
 
@@ -62,6 +63,17 @@ module ActiveJob
           queue_adapter.find_enqueued_jobs.length
         end
       end
+
+      def performed_jobs_size(only: nil)
+        if only
+          queue_adapter.find_performed_jobs do |serialized_job|
+            Array(only).include?(serialized_job['job_class'].constantize)
+          end.length
+        else
+          queue_adapter.find_performed_jobs.length
+        end
+      end
+
 
       def assert_enqueued_with(args={})
         args.assert_valid_keys(:job, :args, :at, :queue)

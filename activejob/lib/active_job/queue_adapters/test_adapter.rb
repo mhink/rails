@@ -11,37 +11,61 @@ module ActiveJob
         end
 
         def perform_enqueued_jobs=(val)
-          @perform_when_enqueued = val
+          @perform_immediately = val
         end
-
-        def perform_enqueued_at_jobs=(val)
-          @perform_when_enqueued  = val
-          @check_when_enqueued_at = val
-        end
+        alias perform_enqueued_at_jobs= perform_enqueued_jobs=
       end
 
       module AdapterMethods
+        def filtered?(job)
+          return false if filter.nil?
+
+          if filter.respond_to?(:call)
+            filter.call(job)
+          elsif filter.is_a? Class
+            job.class != filter
+          elsif filter.respond_to?(:include?)
+            !filter.include? job.class
+          end
+        end
+
         def enqueue(job)
-          return if filtered?(job)
+          return if filtered? job
 
           serialized_job = job.serialize
 
           @queues[job.queue_name] << serialized_job
           @tracked_enqueued_jobs << serialized_job unless (@tracked_enqueued_jobs == nil)
 
-          if @perform_when_enqueued
+          if @perform_immediately
             perform_job(serialized_job)
           end
         end
 
         def enqueue_at(job, timestamp)
-          return if filtered?(job)
+          return if filtered? job
 
-          time_sortable_job = TimeSortableJob.new(job.serialize, timestamp)
-          @waiting_jobs.add time_sortable_job
-          @tracked_enqueued_jobs << time_sortable_job unless (@tracked_enqueued_jobs == nil)
+          if @perform_immediately
+            enqueue(job)
+          else
+            time_sortable_job = TimeSortableJob.new(job.serialize, timestamp)
+            @waiting_jobs.add time_sortable_job
+            @tracked_enqueued_jobs << time_sortable_job unless (@tracked_enqueued_jobs == nil)
+          end
+        end
 
-          check_for_waiting_jobs! if @check_when_enqueued_at
+        # @waiting_jobs is a SortedSet, whose elements are TimeSortableJobs.
+        # So, the first element of @waiting_jobs should be the job with the
+        # earliest #scheduled_at time. This method inspects that time and
+        # enqueues the job for execution if its scheduled execution time has
+        # passed.
+        def check_for_waiting_jobs!
+          next_job = @waiting_jobs.first
+          if Time.at(next_job.timestamp) <= DateTime.now
+            @waiting_jobs.delete(next_job)
+
+            self.enqueue(deserialize_all([next_job]).first)
+          end
         end
 
         # Pulls jobs off queues and executes them.
@@ -113,9 +137,6 @@ module ActiveJob
           end
         end
 
-        def filtered?(job)
-          filter && !Array(filter).include?(job.class)
-        end
       end
 
       class TimeSortableJob
@@ -136,8 +157,7 @@ module ActiveJob
 
       ANY_QUEUE = nil
 
-      attr_accessor :filter
-      attr_accessor :perform_when_enqueued, :check_when_enqueued_at
+      attr_accessor :filter, :perform_immediately
 
       def initialize
         @queues = HashWithIndifferentAccess.new do |queues, queue_name| 
@@ -152,10 +172,9 @@ module ActiveJob
         @performed_jobs = []
         @failed_jobs    = []
         @waiting_jobs   = SortedSet.new
-        @filter         = nil
+        @filter         = ->(job) { false }
 
-        @perform_when_enqueued  = false
-        @check_when_enqueued_at = false
+        @perform_immediately    = false
         @tracked_enqueued_jobs  = nil
         @tracked_performed_jobs = nil
       end
@@ -204,33 +223,16 @@ module ActiveJob
       # Jobs enqueued within this block will be performed
       # immediately.
       def perform_immediately_within(only: nil, &block)
-        perform = @perform_when_enqueued
-        check   = @check_when_enqueued_at
+        perform = @perform_immediately
         filter  = @filter
 
         begin
-          @perform_when_enqueued  = true
-          @check_when_enqueued_at = true
+          @perform_immediately    = true
           @filter                 = only
           yield
         ensure
-          @perform_when_enqueued  = perform
-          @check_when_enqueued_at = check
+          @perform_immediately    = perform
           @filter                 = filter
-        end
-      end
-
-      # @waiting_jobs is a SortedSet, whose elements are TimeSortableJobs.
-      # So, the first element of @waiting_jobs should be the job with the
-      # earliest #scheduled_at time. This method inspects that time and
-      # enqueues the job for execution if its scheduled execution time has
-      # passed.
-      def check_for_waiting_jobs!
-        next_job = @waiting_jobs.first
-        if @perform_when_enqueued || Time.at(next_job.timestamp) <= DateTime.now
-          @waiting_jobs.delete(next_job)
-
-          self.enqueue(deserialize_all([next_job]).first)
         end
       end
 
